@@ -1,0 +1,152 @@
+
+## R Alpha Diversity Analysis Workflow
+
+## R data analysis workflow used in manuscript:
+## An 18S rRNA Workflow for characterizing protists in sewage, with a focus on zoonotic Trichomonads
+## Maritz, J.M., Rogers, K.H., Rock, T.M. et al. Microb Ecol (2017) 74: 923.
+
+## alpha diversity plots, just sewage
+
+############### Alpha Diversity ##############
+
+
+library("ggplot2")
+library("gtools")
+library("gtable")
+library("scales")
+library("grid")
+library("gridExtra")
+library("extrafont")
+
+setwd("~/Desktop/V_sewage_data/Final_analysis_paper/alpha_graphs")
+load("~/Desktop/V_sewage_data/Final_analysis_paper/alpha_graphs/paper_alpha_plots.RData")
+
+## Load in the data
+
+ShannonV9 = read.table("shannonV9.txt", header=T, sep="\t")
+ShannonV9 = ShannonV9[,4:19]
+PDV9 = read.table("PD_whole_treeV9.txt", header=T, sep="\t")
+PDV9 = PDV9[,4:19]
+
+ShannonV4 = read.table("shannonV4.txt", header=T, sep="\t")
+ShannonV4 = ShannonV4[,4:11]
+PDV4 = read.table("PD_whole_treeV4.txt", header=T, sep="\t")
+PDV4 = PDV4[,4:11]
+
+#calculate means of the 10 different rarefactions for each sample
+
+PDV9 = rowMeans(t(PDV9))
+ShannonV9 = rowMeans(t(ShannonV9))
+
+PDV4 = rowMeans(t(PDV4))
+ShannonV4 = rowMeans(t(ShannonV4))
+
+# set up categories for data
+
+VolumeV9 = c("1mL", "1ml", "1ml", "1ml", "10ml", "10ml", "10ml", "10ml", "1ml", "10ml", "1ml", "1ml", "10ml", "1ml", "10ml", "10ml")
+VolumeV4 = c("1ml", "1ml", "1ml", "1ml", "10ml", "10ml", "10ml", "10ml")
+
+## Wilcox test for differences in extraction volume
+
+S_testV9 = wilcox.test(c(ShannonV9) ~ VolumeV9)
+P_testV9 = wilcox.test(c(PDV9) ~ VolumeV9)
+
+S_testV4 = wilcox.test(c(ShannonV4) ~ VolumeV4)
+P_testV4 = wilcox.test(c(PDV4) ~ VolumeV4)
+
+# get means and standard deviation for each volume, region and metric
+
+PD_volumeV9 = data.frame(PDV9, VolumeV9)
+PDV9_1ml = PD_volumeV9[PD_volumeV9$VolumeV9 == "1ml",]
+PDV9_1ml = mean(PDV9_1ml[,1])
+SDPDV9_1ml = sd(PDV9_1ml[,1])
+
+PDV9_10ml = PD_volumeV9[PD_volumeV9$VolumeV9 == "10ml",]
+PDV9_10ml = mean(PDV9_10ml[,1])
+SDPDV9_10ml = sd(PDV9_10ml[,1])
+
+PD_volumeV4 = data.frame(PDV4, VolumeV4)
+PDV4_1ml = PD_volumeV4[PD_volumeV4$VolumeV4 == "1ml",]
+PDV4_1ml = mean(PDV4_1ml[,1])
+SDPDV4_1ml = sd(PDV4_1ml[,1])
+
+PDV4_10ml = PD_volumeV4[PD_volumeV4$VolumeV4 == "10ml",]
+PDV4_10ml = mean(PDV4_10ml[,1])
+SDPDV4_10ml = sd(PDV4_10ml[,1])
+
+S_volumeV9 = data.frame(ShannonV9, VolumeV9)
+SV9_1ml = S_volumeV9[S_volumeV9$VolumeV9 == "1ml",]
+SV9_1ml = mean(SV9_1ml[,1])
+SDSV9_1ml = sd(SV9_1ml[,1])
+
+SV9_10ml = S_volumeV9[S_volumeV9$VolumeV9 == "10ml",]
+SV9_10ml = mean(SV9_10ml[,1])
+SDSV9_10ml = sd(SV9_10ml[,1])
+
+S_volumeV4 = data.frame(ShannonV4, VolumeV4)
+SV4_1ml = S_volumeV4[S_volumeV4$VolumeV4 == "1ml",]
+SV4_1ml = mean(SV4_1ml[,1])
+SDSV4_1ml = sd(SV4_1ml[,1])
+
+SV4_10ml = S_volumeV4[S_volumeV4$VolumeV4 == "10ml",]
+SV4_10ml = mean(SV4_10ml[,1])
+SDSV4_10ml = sd(SV4_10ml[,1])
+
+## make bar plot for volume both regions
+
+Volume = c("1ml", "10ml", "1ml", "10ml", "1ml", "10ml", "1ml", "10ml")
+Region = c("V9", "V9", "V4", "V4", "V9", "V9", "V4", "V4")
+Index = rep(c("Phylogenetic Diversity", "Shannon Index"), each = 4)
+Div_plot = c(PDV9_1ml, PDV9_10ml, PDV4_1ml, PDV4_10ml, SV9_1ml, SV9_10ml, SV4_1ml, SV4_10ml)
+SD_plot = c(SDPDV9_1ml, SDPDV9_10ml, SDPDV4_1ml, SDPDV4_10ml, SDSV9_1ml, SDSV9_10ml, SDSV4_1ml, SDSV4_10ml)
+
+Alpha = data.frame(Div_plot, Index, Volume, Region, SD_plot)
+limits = aes(ymin=Div_plot-SD_plot, ymax=Div_plot+SD_plot)
+family="Arial"
+
+PD.1 = ggplot(Alpha, aes(x=Region, y=Div_plot, group=Volume)) + geom_bar(aes(fill=Volume), position=position_dodge(width=0.9), stat = "identity") 
+PD.2 = PD.1 + geom_errorbar(limits, position=position_dodge(width=0.9), width=0.25)
+PD.3 = PD.2 + facet_wrap(~Index, scales="free_y", ncol=2, shrink=FALSE) 
+PD.4 = PD.3 + theme(strip.text.x=element_text(size=9, face="bold", family="Arial"), axis.text.x=element_text(size=9, family="Arial"), axis.text.y=element_text(size=9, family="Arial"), axis.title.x=element_blank(), axis.title.y=element_blank(), legend.title=element_blank(), legend.text=element_text(size=11, family="Arial"))
+PD.5 = PD.4 + theme(axis.ticks.x=element_blank(), axis.ticks.y=element_blank(), panel.background=element_rect(fill="grey90"), plot.margin=unit(c(.1,.1,0,.1), "cm"), panel.grid.minor=element_blank(), legend.key=element_rect(fill="white"))
+
+## Set up for the V9 primer and volume comparison
+
+PrimerV9 = c("Block", "Block", "None", "None", "Block", "Block", "None", "None", "Block", "Block", "None", "Block", "None", "None", "None", "Block")
+
+VP = c("1ml_Block", "1ml_Block", "1ml", "1ml", "10ml_Block", "10ml_Block", "10ml", "10ml", "1ml_Block", "10ml_Block", "1ml", "1ml_Block", "10ml", "1ml", "10ml", "10ml_Block")
+VP = as.factor(VP)
+
+## Wilcox and Kruskal tests for differences in extraction volume and blocking primer
+
+S_testV9_P = wilcox.test(c(ShannonV9) ~ PrimerV9)
+P_testV9_P = wilcox.test(c(PDV9) ~ PrimerV9)
+
+S_testV9_VP = kruskal.test(c(ShannonV9) ~ VP)
+P_testV9_VP = kruskal.test(c(PDV9) ~ VP)
+
+## make the plot for primer and volume V9
+
+Treatment = c("1ml Block", "1ml Block", "1ml", "1ml", "10ml Block", "10ml Block", "10ml", "10ml", "1ml Block", "10ml Block", "1ml", "1ml Block", "10ml", "1ml", "10ml", "10ml Block")
+Index_V9 = rep(c("Phylogenetic Diversity", "Shannon index"), each = 16)
+Alpha_div_V9 = c(PDV9, ShannonV9)
+
+AlphaV9 = data.frame(Alpha_div_V9, Index_V9, Treatment)
+
+V9.1 = ggplot(AlphaV9, aes(x=Treatment, y=Alpha_div_V9)) + geom_boxplot(notch=FALSE, alpha= 1, aes(fill=Treatment))
+V9.2 = V9.1 + scale_color_manual(breaks=c("10ml", "10ml Block", "1ml", "1ml Block"),values=c("#0000ff","#ff7f2a","#cc00ff","#ffff00"))
+V9.3 = V9.2 + facet_wrap(~Index_V9, scales="free_y", ncol=2, shrink=FALSE)
+V9.4 = V9.3 + theme(axis.text.x=element_blank(), axis.title.x=element_blank(), axis.ticks.x=element_blank(), axis.ticks.y=element_blank(), strip.text.x=element_text(size=10, face="bold", family="Arial"), axis.title.y=element_blank(), axis.text.y=element_text(size=10, family="Arial"), legend.title=element_text(size=9, family="Arial"), legend.text=element_text(size=5, family="Arial"))
+V9.5 = V9.4 + theme(panel.background=element_rect(fill="grey90"), plot.margin=unit(c(.1,.1,0,.1), "cm"), legend.key=element_rect(fill="white"), panel.grid.minor=element_blank())
+
+## merge the two plots into one
+
+grid.arrange(PD.5, V9.5)
+
+Fig3 = arrangeGrob(PD.5, V9.5)
+
+ggsave("Fig3.pdf", Fig3, dpi=300)
+
+pdf(file="Fig3_draft.pdf", width=5, height=5, bg="white", useDingbats = FALSE)
+plot(Fig3)
+dev.off()

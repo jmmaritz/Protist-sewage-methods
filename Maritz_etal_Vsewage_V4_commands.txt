@@ -1,0 +1,405 @@
+
+## 18S rRNA gene amplicons - V4 WORKFLOW
+
+## QIIME data analysis workflow used in manuscript:
+## An 18S rRNA Workflow for characterizing protists in sewage, with a focus on zoonotic Trichomonads
+## Maritz, J.M., Rogers, K.H., Rock, T.M. et al. Microb Ecol (2017) 74: 923.
+
+## All data analysis carried out on New York University's High Performance Compute cluster
+## Parameters and file paths may vary on your system
+## Edit commands as necessary to replicate these data analysis locally
+
+
+
+############### Trimming and Demultiplexing Raw Data - V4 ##############
+
+#!/bin/bash
+
+#PBS -l nodes=1:ppn=5,walltime=2:00:00,mem=15gb
+#PBS -N trim_qf_V4
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+module load qiime/intel/1.8.0
+module load ea_utils/intel/1.1.2
+module load trimmomatic/0.32
+
+# change these paths according to where the project files are locally
+SEQS=V4
+JOIN=V4/Join
+READ1=V4/Read1
+
+# Tests for the V4 region
+
+# Join normal
+
+join_paired_ends.py -f $SEQS/R1_1.fastq.gz \
+        -r $SEQS/R2_1.fastq.gz -b $SEQS/I1_1.fastq.gz \
+        -o $JOIN/fastq-join_joined \
+        -j 10 -p 15
+
+split_libraries_fastq.py -i $JOIN/fastq-join_joined/fastqjoin.join.fastq \
+        -b $JOIN/fastq-join_joined/fastqjoin.join_barcodes.fastq \
+        -m $JOIN/Private_sewage_18SV4_map_file.txt \
+        -o $JOIN/fastq-join_joined \
+        --rev_comp_mapping_barcodes -q 19 -r 5 -p 0.70
+
+	# --rev_comp_mapping_barcodes looks for the reverse compliment of the barcodes in the mapping file
+	# -q 19 minimum quality score of 20
+	# -r 5 allows 5 poor quality bases before read truncation
+	# -p 0.70 minimum fraction of consecutive high quality base calls to include a read
+
+# Just Read 1
+
+split_libraries_fastq.py -i $SEQS/R1_1.fastq.gz \
+        -b $SEQS/I1_1.fastq.gz \
+        -m $SEQS/Private_sewage_18SV4_map_file.txt \
+        -o $SEQS \
+        --rev_comp_mapping_barcodes -q 19 -r 5 -p 0.70
+
+# Read 1 trimmed to 250bp
+	# This gave the most data so all further analysis was done on these reads
+
+java -jar /share/apps/trimmomatic/0.32/trimmomatic-0.32.jar SE -threads 5 \
+        $SEQS/R1_1.fastq.gz \
+        $READ1/R1_1_trim150.fastq.gz \
+        CROP:250
+
+split_libraries_fastq.py -i $READ1/R1_1_trim150.fastq \
+        -b $SEQS/I1_1.fastq.gz \
+        -m $SEQS/Private_sewage_18SV4_map_file.txt \
+        -o $READ1 \
+        --rev_comp_mapping_barcodes -q 19 -r 5 -p 0.70
+
+# truncate the reverse primer
+
+truncate_reverse_primer.py -f $READ1/seqs.fna \
+	-m $SEQS/Private_sewage_18SV9_map_file.txt \
+	-o $READ1/rev_out
+	
+
+############### De novo OTU Picking - UPARSE - V4 ##############
+
+#!/bin/bash
+
+#PBS -l nodes=1:ppn=2,walltime=3:00:00,mem=15gb
+#PBS -N uparse_map_v4
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+module load python/intel/2.7.9
+module load qiime/intel/1.8.0
+
+READ1=V4/Read1/rev_out
+OTUS=V4/Uparse
+
+# dereplicate the sequences
+
+/share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 -derep_fulllength $READ1/V4_visionaire_read1_trim_seqs.fna \
+	-fastaout $OTUS/Vsewage_V4_dereplicated.fasta \
+	-sizeout
+
+	# -sizeout prints how many are in that cluster
+
+# remove singletons
+
+/share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 -sortbysize $OTUS/Vsewage_V4_dereplicated.fasta \
+	-fastaout $OTUS/Vsewage_V4_derep_min2.fasta \
+	-minsize 2
+
+# Cluster the OTUs
+
+/share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 --cluster_otus $OTUS/Vsewage_V4_derep_min2.fasta \
+	-otus $OTUS/Vsewage_V4_otus.fasta \
+	-uparseout $OTUS/Vsewage_V4_otus.up \
+	-relabel OTU_ -otu_radius_pct 2
+
+	# -relable OTU_ changes the name of rep set sequences to OTU_#
+	# -otu_radius_pct 2 clusters at 98%
+	# chimera filtering happens automatically
+
+# Map the reads back to OTUs
+
+/share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 -usearch_global $READ1/V4_visionaire_read1_trim_seqs.fna \
+	-db $OTUS/Vsewage_V4_otus.fasta \
+	-strand plus -id 0.98 \
+	-maxaccepts 8 -maxrejects 64 \
+	-top_hit_only \
+	-uc $OTUS/Vsewage_V4_otu_map.uc
+
+	# a given read may match two or more OTUs at the given identity threshold. 
+	# In such cases, usearch_global will tend to assign the read to the OTU with highest identity 
+	# and break ties arbitrarily 
+	# -maxaccepts 8 -maxrejects 64 help to mitigate issues above and get more consistent OTU assignments
+	# -top_hit_only breaks ties consistently by choosing the first target sequence in database order
+	
+# Convert the UPARSE .uc file to a QIIME compatible OTU mat .txt file
+	# python script modified from the readmap2qiime.py script provided by USEARCH
+	# https://drive5.com/otupipe/readmap2qiime.txt
+
+python readmap2qiime.py $OTUS/Vsewage_V4_otu_map.uc > $OTUS/Vsewage_V4_otus.txt
+
+# Filter the rep set to only the OTUs with reads mapping to them
+	# Not all the OTUs end up with mapped reads, not sure why, but it happens, generally its only a few
+
+cut -f 10 $OTUS/Vsewage_V4_otu_map.uc | sort -u > $OTUS/rep_seqs_to_keep.txt
+
+# Filter the fasta file to only include the OTUs with reads mapping to them
+
+filter_fasta.py -f $OTUS/Vsewage_V4_otus.fasta -o $OTUS/Vsewage_V4_otus_rep_set.fasta -s $OTUS/rep_seqs_to_keep.txt
+
+
+############### Taxonomy Assignment and OTU filtering - V4 ##############
+
+#!/bin/bash
+
+#PBS -l nodes=1:ppn=5,walltime=5:00:00,mem=15gb
+#PBS -N repset_filter_taxonomy_v4
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+module purge
+module load qiime/intel/1.8.0
+module load blast/2.2.22
+
+OTUS=V4/Uparse
+TAX=Silva_111_curated_V2_2016/Euk_only
+TAX99=Silva_111_curated_V2_2016/99_clusters
+TAXONOMY=V4/Uparse/Taxonomy
+TABLES=V4/Uparse/Otu_tables
+
+mkdir $OTUS/Taxonomy
+mkdir $OTUS/Otu_tables
+
+# Assign taxonomy in two steps, first with  curated Silva database
+
+assign_taxonomy.py -i $OTUS/Vsewage_V4_otus_rep_set.fasta -m blast \
+	-r $TAX/Euk_Silva_111_curated.fasta \
+	-t $TAX/Euk_Silva_111_taxa_map_curated.txt \
+	-o $TAXONOMY -e 1e-20
+
+# Next use SILVA files clustered at 99% on anything that was not assigned
+	# this is because if you don't you end up with a huge portion in the No BLAST hit category
+	# they have a hit, they just aren't eukaryotes or are an uncultured protist
+	# second step required so these results can be filtered out and not artifically inflate the unassigned category
+
+# Get OTU ids with no blast hit
+
+grep "No blast hit" $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments.txt | cut -f 1 > $TAXONOMY/Unassigned_otu_ids.txt
+
+# Get OTU ids that were assigned taxonomy
+
+grep -v "No blast hit" $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments.txt > $TAXONOMY/Assigned_otus.txt
+
+# Filter the fasta file to get unassigned sequences
+
+filter_fasta.py -f $OTUS/Vsewage_V4_otus_rep_set.fasta -s $TAXONOMY/Unassigned_otu_ids.txt -o $TAXONOMY/Unassigned_otus.fasta
+
+# Assign taxonomy to the unassigned sequences with the normal SILVA database
+
+assign_taxonomy.py -i $TAXONOMY/Unassigned_otus.fasta -m blast \
+	-r $TAX99/99_Silva_111_rep_set.fasta \
+	-t $TAX99/99_Silva_111_taxa_map.txt \
+	-o $TAXONOMY -e 1e-20
+
+# Combine the taxonomy assignments
+
+cat $TAXONOMY/Assigned_otus.txt $TAXONOMY/Unassigned_otus_tax_assignments.txt > $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_edited.txt
+
+# Remove "OTU_" from the OTUs as its not compatible with QIIME
+
+perl -pe 's/^OTU_//g' $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_edited.txt > $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_fixed.txt
+
+# Make the OTU table with your taxonomic assignments
+
+make_otu_table.py -i $OTUS/Vsewage_V4_otus.txt -t $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_fixed.txt \
+	-o $TABLES/vsewage_otu_tableV4.biom
+	
+biom summarize-table -i $TABLES/vsewage_otu_tableV4.biom \
+	-o $TABLES/Unfiltered_seq_counts.txt
+
+# Filter out non 18S sequences, and potential chloroplast sequences
+	# The V9 primers are 3-domain primers so you will get Bacteria and Archaea in your data
+
+filter_taxa_from_otu_table.py -i $TABLES/vsewage_otu_tableV4.biom \
+	-o $TABLES/Euk_vsewage_otu_tableV4.biom \
+	-n Bacteria,Archaea
+
+biom summarize-table -i $TABLES/Euk_vsewage_otu_tableV4.biom \
+	-o $TABLES/euk_seq_counts.txt
+
+# Remove low abundance OTUs (<0.0005%) of reads in total dataset
+	# Conservative, <0.005% recommended for Illumina data
+
+filter_otus_from_otu_table.py -i $TABLES/Euk_vsewage_otu_tableV4.biom \
+	-o $TABLES/Euk_vsewage_otu_tableV4_af.biom \
+	--min_count_fraction 0.000005
+
+# summarize taxonomy
+
+summarize_taxa.py -i $TABLES/Euk_vsewage_otu_tableV4_af.biom \
+	-o $OTUS -L 3,10,13
+
+
+############### Alignment and Phylogeny - V4 ##############
+
+#!/bin/bash
+
+#PBS -l nodes=1:ppn=5,walltime=1:00:00,mem=25gb
+#PBS -N phylogeny
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+module load qiime/intel/1.8.0
+
+INPUT=V4/Uparse
+OUTPUT=V4/Uparse
+TEMPLATE=Silva_111_curated_V2_2016/Euk_only
+
+# align OTU rep set sequences using PYNAST
+
+align_seqs.py -i $INPUT/Vsewage_V4_otus_rep_set.fasta \
+	-m pynast \
+	-t $TEMPLATE/Euk_Silva_111_curated_aligned.fasta \
+	-o $OUTPUT/aligned \
+	-p 0.70 -e 70
+
+# Filter alignment
+
+filter_alignment.py -i $OUTPUT/aligned/Vsewage_V4_otus_rep_set_aligned.fasta \
+	-o $OUTPUT/aligned \
+	-g 0.98
+
+# Remove "OTU_" from the OTUs as its not compatible with QIIME
+
+perl -pe 's/OTU_//g' $OUTPUT/aligned/Vsewage_V4_otus_rep_set_aligned_pfiltered.fasta > $OUTPUT/aligned/Vsewage_V4_otus_rep_set_aligned_pfiltered_fixed.fasta
+
+# Make phylogeny
+
+make_phylogeny.py -i $OUTPUT/aligned/Vsewage_V4_otus_rep_set_aligned_pfiltered_fixed.fasta \
+	-o $OUTPUT/aligned/Vsewage_V4_rep_set.tre
+
+
+############### Alpha Diversity Analyses - V4 ##############
+
+#!/bin/bash
+
+#PBS -l nodes=1:ppn=5,walltime=1:00:00,mem=10gb
+#PBS -N rarefaction_euk_V9
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+module purge
+module load qiime/intel/1.8.0
+
+TABLES=V4/Uparse/Otu_tables
+OTUS=V4/Uparse
+TREE=V4/Uparse/aligned/Vsewage_V4_rep_set.tre
+
+# Make rarefactions at 600,000 sequences
+	# this was chosen based on the minimim value in the biom file
+
+multiple_rarefactions_even_depth.py -i $TABLES/Euk_vsewage_otu_tableV4_af.biom \
+	-o $OTUS/alpha_even \
+	-n 10 -d 600000
+
+alpha_diversity.py -i $OTUS/alpha_even \
+	-m observed_species,equitability,shannon,PD_whole_tree \
+	-o $OTUS/alpha_div_even \
+	-t $TREE
+
+collate_alpha.py -i $OTUS/alpha_div_even \
+	-o $OTUS/collated_alpha_even
+
+# Comparison and statistical tests of Alpha diversity were performed in R
+	# See Maritz_etal_Alpha_diversity_R.txt
+	# Rename the files in the collated_alpha_even like this:
+	# PD_whole_tree.txt to PD_whole_treeV4.txt
+	# shannon.txt to shannonV4.txt
+	
+
+############### Remove Kit Metazoan, Fungi, Plants and Regenerate Outputs - V4 ##############
+
+#!/bin/bash
+
+#PBS -l nodes=1:ppn=5,walltime=0:30:00,mem=10gb
+#PBS -N protist_V4
+#PBS -m ae
+
+cd $PBS_O_WORKDIR
+
+module purge
+module load qiime/intel/1.8.0
+
+SEQS=V4
+TABLES=V4/Uparse/Otu_tables
+OTUS=V4/Uparse
+TREE=V4/Uparse/aligned/Vsewage_V4_rep_set.tre
+
+mkdir $OTUS/Protist_alpha
+
+# Remove Metazoan, Fungi, Plant and uncultured sequences
+
+filter_taxa_from_otu_table.py -i $TABLES/Euk_vsewage_otu_tableV4.biom \
+	-o $TABLES/P_vsewage_otu_tableV4.biom \
+	-n __Fungi,__Metazoa,__Archaeplastida,__Mb-5C,__DH147-EKD23,__uncultured_,__unidentified_,__RT5iin25,__uncultured_eukaryote
+
+# Remove low abundance OTUs (<0.0005%) of reads in total dataset
+	# Conservative, <0.005% recommended for Illumina data
+
+filter_otus_from_otu_table.py -i $TABLES/P_vsewage_otu_tableV4.biom \
+	-o $TABLES/P_vsewage_otu_tableV4_af.biom \
+	--min_count_fraction 0.000005
+
+biom summarize-table -i $TABLES/P_vsewage_otu_tableV4_af.biom \
+	-o $TABLES/P_seqs_af.txt
+
+# summarize taxonomy
+
+summarize_taxa.py -i $TABLES/P_vsewage_otu_tableV4_af.biom \
+	-o $TABLES -L 4,10
+
+# Redo Alpha Diversity analysis
+	# 600,000 sequences was chosen to use the same values as the previous analysis
+
+multiple_rarefactions.py -i $TABLES/P_vsewage_otu_tableV4_af.biom \
+	-o $OTUS/Protist_alpha \
+	-m 60000 -x 600000 -s 60000
+
+# -m min number of seqs per sample for rarefaction
+# -s steps between min and max
+# -x maximum number of seqs to go to, should be below smallest sample to include all samples
+
+alpha_diversity.py -i $OTUS/Protist_alpha \
+	-m PD_whole_tree,shannon \
+	-o $OTUS/Protist_alpha_div \
+	-t $TREE
+
+collate_alpha.py -i $OTUS/Protist_alpha_div \
+	-o $OTUS/Protist_collated_alpha
+	
+make_rarefaction_plots.py -i $OTUS/Protist_collated_alpha \
+	-o $OTUS/Protist_rarefaction \
+	-m $SEQS/Private_sewage_18SV4_map_file.txt \
+	-d 300
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
