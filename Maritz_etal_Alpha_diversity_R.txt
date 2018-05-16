@@ -5,7 +5,6 @@
 ## An 18S rRNA Workflow for characterizing protists in sewage, with a focus on zoonotic Trichomonads
 ## Maritz, J.M., Rogers, K.H., Rock, T.M. et al. Microb Ecol (2017) 74: 923.
 
-## alpha diversity plots, just sewage
 
 ############### Alpha Diversity ##############
 
