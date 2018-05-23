@@ -149,3 +149,5 @@ ggsave("Fig3.pdf", Fig3, dpi=300)
 pdf(file="Fig3_draft.pdf", width=5, height=5, bg="white", useDingbats = FALSE)
 plot(Fig3)
 dev.off()
+
+save.image("~/Desktop/V_sewage_data/Final_analysis_paper/alpha_graphs/paper_alpha_plots.RData")
