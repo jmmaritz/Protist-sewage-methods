@@ -206,7 +206,7 @@ biom summarize-table -i $TABLES/Euk_vsewage_otu_tableV9.biom \
 	-o $TABLES/euk_seq_counts.txt
 
 # Remove low abundance OTUs (<0.0005%) of reads in total dataset
-	# Conservative, <0.005% recommended for Illumina data
+	# <0.005% recommended for Illumina data
 
 filter_otus_from_otu_table.py -i $TABLES/Euk_vsewage_otu_tableV9.biom \
 	-o $TABLES/Euk_vsewage_otu_tableV9_af.biom \
