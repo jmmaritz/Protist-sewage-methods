@@ -195,7 +195,7 @@ make_otu_table.py -i $OTUS/Vsewage_V9_otus.txt -t $TAXONOMY/Vsewage_V9_otus_rep_
 biom summarize-table -i $TABLES/vsewage_otu_tableV9.biom \
 	-o $TABLES/Unfiltered_seq_counts.txt
 
-# Filter out non 18S sequences, and potential chloroplast sequences
+# Filter out non 18S sequences
 	# The V9 primers are 3-domain primers so you will get Bacteria and Archaea in your data
 
 filter_taxa_from_otu_table.py -i $TABLES/vsewage_otu_tableV9.biom \
