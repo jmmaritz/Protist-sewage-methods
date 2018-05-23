@@ -33,7 +33,6 @@ READ1=V4/Read1
 # Tests for the V4 region
 
 # Join normal
-
 join_paired_ends.py -f $SEQS/R1_1.fastq.gz \
         -r $SEQS/R2_1.fastq.gz -b $SEQS/I1_1.fastq.gz \
         -o $JOIN/fastq-join_joined \
@@ -51,7 +50,6 @@ split_libraries_fastq.py -i $JOIN/fastq-join_joined/fastqjoin.join.fastq \
 	# -p 0.70 minimum fraction of consecutive high quality base calls to include a read
 
 # Just Read 1
-
 split_libraries_fastq.py -i $SEQS/R1_1.fastq.gz \
         -b $SEQS/I1_1.fastq.gz \
         -m $SEQS/Private_sewage_18SV4_map_file.txt \
@@ -60,7 +58,6 @@ split_libraries_fastq.py -i $SEQS/R1_1.fastq.gz \
 
 # Read 1 trimmed to 250bp
 	# This gave the most data so all further analysis was done on these reads
-
 java -jar /share/apps/trimmomatic/0.32/trimmomatic-0.32.jar SE -threads 5 \
         $SEQS/R1_1.fastq.gz \
         $READ1/R1_1_trim150.fastq.gz \
@@ -73,7 +70,6 @@ split_libraries_fastq.py -i $READ1/R1_1_trim150.fastq \
         --rev_comp_mapping_barcodes -q 19 -r 5 -p 0.70
 
 # truncate the reverse primer
-
 truncate_reverse_primer.py -f $READ1/seqs.fna \
 	-m $SEQS/Private_sewage_18SV9_map_file.txt \
 	-o $READ1/rev_out
@@ -96,7 +92,6 @@ READ1=V4/Read1/rev_out
 OTUS=V4/Uparse
 
 # dereplicate the sequences
-
 /share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 -derep_fulllength $READ1/V4_visionaire_read1_trim_seqs.fna \
 	-fastaout $OTUS/Vsewage_V4_dereplicated.fasta \
 	-sizeout
@@ -104,13 +99,11 @@ OTUS=V4/Uparse
 	# -sizeout prints how many are in that cluster
 
 # remove singletons
-
 /share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 -sortbysize $OTUS/Vsewage_V4_dereplicated.fasta \
 	-fastaout $OTUS/Vsewage_V4_derep_min2.fasta \
 	-minsize 2
 
 # Cluster the OTUs
-
 /share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 --cluster_otus $OTUS/Vsewage_V4_derep_min2.fasta \
 	-otus $OTUS/Vsewage_V4_otus.fasta \
 	-uparseout $OTUS/Vsewage_V4_otus.up \
@@ -121,7 +114,6 @@ OTUS=V4/Uparse
 	# chimera filtering happens automatically
 
 # Map the reads back to OTUs
-
 /share/apps/qiime/1.8.0/intel/usearch64/usearch8.0.1623_i86linux64 -usearch_global $READ1/V4_visionaire_read1_trim_seqs.fna \
 	-db $OTUS/Vsewage_V4_otus.fasta \
 	-strand plus -id 0.98 \
@@ -138,16 +130,13 @@ OTUS=V4/Uparse
 # Convert the UPARSE .uc file to a QIIME compatible OTU mat .txt file
 	# python script modified from the readmap2qiime.py script provided by USEARCH
 	# https://drive5.com/otupipe/readmap2qiime.txt
-
 python readmap2qiime.py $OTUS/Vsewage_V4_otu_map.uc > $OTUS/Vsewage_V4_otus.txt
 
 # Filter the rep set to only the OTUs with reads mapping to them
 	# Not all the OTUs end up with mapped reads, not sure why, but it happens, generally its only a few
-
 cut -f 10 $OTUS/Vsewage_V4_otu_map.uc | sort -u > $OTUS/rep_seqs_to_keep.txt
 
 # Filter the fasta file to only include the OTUs with reads mapping to them
-
 filter_fasta.py -f $OTUS/Vsewage_V4_otus.fasta -o $OTUS/Vsewage_V4_otus_rep_set.fasta -s $OTUS/rep_seqs_to_keep.txt
 
 
@@ -175,7 +164,6 @@ mkdir $OTUS/Taxonomy
 mkdir $OTUS/Otu_tables
 
 # Assign taxonomy in two steps, first with  curated Silva database
-
 assign_taxonomy.py -i $OTUS/Vsewage_V4_otus_rep_set.fasta -m blast \
 	-r $TAX/Euk_Silva_111_curated.fasta \
 	-t $TAX/Euk_Silva_111_taxa_map_curated.txt \
@@ -187,43 +175,35 @@ assign_taxonomy.py -i $OTUS/Vsewage_V4_otus_rep_set.fasta -m blast \
 	# second step required so these results can be filtered out and not artifically inflate the unassigned category
 
 # Get OTU ids with no blast hit
-
 grep "No blast hit" $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments.txt | cut -f 1 > $TAXONOMY/Unassigned_otu_ids.txt
 
 # Get OTU ids that were assigned taxonomy
-
 grep -v "No blast hit" $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments.txt > $TAXONOMY/Assigned_otus.txt
 
 # Filter the fasta file to get unassigned sequences
-
 filter_fasta.py -f $OTUS/Vsewage_V4_otus_rep_set.fasta -s $TAXONOMY/Unassigned_otu_ids.txt -o $TAXONOMY/Unassigned_otus.fasta
 
 # Assign taxonomy to the unassigned sequences with the normal SILVA database
-
 assign_taxonomy.py -i $TAXONOMY/Unassigned_otus.fasta -m blast \
 	-r $TAX99/99_Silva_111_rep_set.fasta \
 	-t $TAX99/99_Silva_111_taxa_map.txt \
 	-o $TAXONOMY -e 1e-20
 
 # Combine the taxonomy assignments
-
 cat $TAXONOMY/Assigned_otus.txt $TAXONOMY/Unassigned_otus_tax_assignments.txt > $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_edited.txt
 
 # Remove "OTU_" from the OTUs as its not compatible with QIIME
-
 perl -pe 's/^OTU_//g' $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_edited.txt > $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_fixed.txt
 
 # Make the OTU table with your taxonomic assignments
-
 make_otu_table.py -i $OTUS/Vsewage_V4_otus.txt -t $TAXONOMY/Vsewage_V4_otus_rep_set_tax_assignments_fixed.txt \
 	-o $TABLES/vsewage_otu_tableV4.biom
 	
 biom summarize-table -i $TABLES/vsewage_otu_tableV4.biom \
 	-o $TABLES/Unfiltered_seq_counts.txt
 
-# Filter out non 18S sequences, and potential chloroplast sequences
+# Filter out non 18S sequences
 	# The V9 primers are 3-domain primers so you will get Bacteria and Archaea in your data
-
 filter_taxa_from_otu_table.py -i $TABLES/vsewage_otu_tableV4.biom \
 	-o $TABLES/Euk_vsewage_otu_tableV4.biom \
 	-n Bacteria,Archaea
@@ -232,14 +212,12 @@ biom summarize-table -i $TABLES/Euk_vsewage_otu_tableV4.biom \
 	-o $TABLES/euk_seq_counts.txt
 
 # Remove low abundance OTUs (<0.0005%) of reads in total dataset
-	# Conservative, <0.005% recommended for Illumina data
-
+	# <0.005% recommended for Illumina data
 filter_otus_from_otu_table.py -i $TABLES/Euk_vsewage_otu_tableV4.biom \
 	-o $TABLES/Euk_vsewage_otu_tableV4_af.biom \
 	--min_count_fraction 0.000005
 
-# summarize taxonomy
-
+# Summarize taxonomy
 summarize_taxa.py -i $TABLES/Euk_vsewage_otu_tableV4_af.biom \
 	-o $OTUS -L 3,10,13
 
